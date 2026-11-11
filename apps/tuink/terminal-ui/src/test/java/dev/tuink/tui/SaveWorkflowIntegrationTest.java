@@ -134,9 +134,11 @@ class SaveWorkflowIntegrationTest {
             window.event(new TextInput("draft "));
             Files.writeString(window.document, "external");
             window.command(TuinkCommand.DOCUMENT_SAVE);
-            assertTrue(window.notification.message.startsWith("Save failed:"));
+            window.await(() -> window.selected().uiState().modalState.isSaveOverwriteConfirm());
+            assertTrue(window.selected().uiState().overwriteApproval.request().externalOverwrite());
             assertTrue(window.active().state().isDirty());
             assertEquals("external", Files.readString(window.document));
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
             Path copy = directory.resolve("copy.txt");
             submitFilename(window, copy);
             assertEquals("draft original", Files.readString(copy));

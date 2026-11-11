@@ -289,6 +289,8 @@ ui.wrapWords=false
 ui.readingMode=false
 ui.confirmOnClose=true
 ui.mouseMode=true
+# Optional; omission means true.
+ui.autoReloadUnmodifiedFiles=true
 # Optional; omission means false.
 ui.rightClickClipboard=false
 # Optional; omission means true.
@@ -349,6 +351,11 @@ The optional Boolean `ui.showDocumentPath` defaults to `true` when absent. The
 writer records its value explicitly. It controls the passive path row in Source
 and Preview; temporarily hiding the row in a short terminal does not change the
 preference. Existing format 2 profiles remain readable without conversion.
+
+The optional Boolean `ui.autoReloadUnmodifiedFiles` defaults to `true`; clean
+bound files reload on external changes while preserving bounded cursor/viewport.
+Dirty files retain their drafts and warning. The value round-trips in format 2;
+malformed values follow the incompatible-profile rules.
 
 Project search adds optional current-format `search.*` preferences. Omitted
 fields use the [documented defaults](project-search.md#defaults-and-limits).
@@ -489,8 +496,8 @@ not depend on an external process replacing the target with a directory.
 For example, `file:///home/user/legacy-%FF.txt` retains the byte `FF`; it must
 not become a filename containing the Unicode replacement character.
 
-`fileBaseline` records the last successfully loaded, saved or explicitly accepted
-Keep/Update version's physical, absolute normalized target path, original byte
+`fileBaseline` records the last successfully loaded, saved or explicitly reloaded
+version's physical, absolute normalized target path, original byte
 count and SHA-256 digest. It is
 preserved across recovery so saving a restored document can detect changes made
 by another process since that accepted version. The digest is exactly 64 lowercase
@@ -501,10 +508,10 @@ digest and byte size must all be empty. A baseline requires `currentFile.present
 baseline can be restored, but ordinary save refuses to overwrite its file; use
 Save As with a different name or reopen the original file.
 
-Keep/Update does not change the recovery schema. Keep retains the current text
-and format with the acknowledged disk baseline; Update changes text/format as
-one session Undo step. Undo does not roll the accepted disk baseline back.
-Unsaved frozen Preview text after Keep or Undo is checkpointed with the same
+Automatic and manual Update do not change the recovery schema. Update changes
+text/format as one session Undo step. Explicit overwrite confirmation uses a
+fresh inspected disk version without changing the draft before publication. Undo does not roll the accepted disk baseline back.
+Unsaved frozen Preview text after Undo is checkpointed with the same
 format 8 fields as live drafts. Recovery retains that current text, format and
 baseline, while Undo/Redo entries, external notice scopes and the original-open
 text used for historical gutter markers remain current-session state.

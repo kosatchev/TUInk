@@ -105,10 +105,12 @@ class SaveWorkflowTest {
         var context = context(List.of(first, second));
         var result = finish(context, SaveWorkflow.quit(context, ConfirmChoice.SAVE));
         assertTrue(result.running());
-        assertEquals(UiModalState.quitConfirm(), result.modalState());
+        assertTrue(result.modalState().isSaveOverwriteConfirm());
+        assertEquals(dev.tuink.tui.flow.SaveContinuation.QUIT, result.modalState().saveContinuation());
+        assertTrue(result.overwriteApproval().request().externalOverwrite());
         assertEquals(1, result.activateTabIndex());
         assertEquals(-1, result.closeTabIndex());
-        assertEquals(SaveWorkflow.NoticeKind.ERROR, result.notice().kind());
+        assertEquals(SaveWorkflow.NoticeKind.CLEAR, result.notice().kind());
         assertFalse(first.state().isDirty());
         assertTrue(second.state().isDirty());
         assertEquals("draft original", Files.readString(JvmDocumentStorage.pathOf(first.state().getCurrentResource())));

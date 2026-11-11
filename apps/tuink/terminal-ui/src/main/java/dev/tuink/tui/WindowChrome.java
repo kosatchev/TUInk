@@ -283,7 +283,14 @@ final class WindowChrome {
 
     private static ConfirmBarView confirmation(Input input, int rows, int cols) {
         var modal = input.modal(); var host = input.host();
-        if (modal.isSaveOverwriteConfirm()) return host.buildOverwriteConfirmBar(modal.pendingOverwritePath(), cols, rows);
+        if (modal.isSaveOverwriteConfirm()) {
+            var source = input.focus().overwriteApproval;
+            var snapshot = input.focus().snapshotOverwriteApproval;
+            boolean external = source != null && source.request().externalOverwrite()
+                || snapshot != null && snapshot.request().externalOverwrite();
+            return external ? host.buildExternalOverwriteConfirmBar(modal.pendingOverwritePath(), cols, rows)
+                : host.buildOverwriteConfirmBar(modal.pendingOverwritePath(), cols, rows);
+        }
         if (modal.isQuitConfirm()) {
             long snapshots = input.context().presentations().stream().filter(tab -> tab instanceof PreviewTab preview
                 && preview.source() instanceof PreviewTab.ClosedSnapshot frozen

@@ -116,24 +116,22 @@ class NarrowSaveAsIntegrationTest {
     }
 
     @Test
-    void failedSaveKeepsItsDraftAcrossTinyResizeAndCanBeRetriedWithANewVisibleName() throws Exception {
+    void externalConflictKeepsItsDraftAcrossTinyResizeAndCanBeRetriedWithANewVisibleName() throws Exception {
         try (EditorWindowFixture window = window()) {
             requestSaveAs(window, window.document);
             Files.writeString(window.document, "external change");
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
-            assertTrue(window.notification.message.startsWith("Save failed:"));
-            String failure = window.notification.message;
-            assertEquals(SaveAsBarView.Target.FIELD, window.host.saveAsFocusManager().focused().orElseThrow());
+            window.await(() -> window.selected().uiState().modalState.isSaveOverwriteConfirm());
+            assertTrue(window.selected().uiState().overwriteApproval.request().externalOverwrite());
             window.resize(24, 10);
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
-            assertEquals(failure, window.notification.message);
-            assertEquals(window.host.styles.windows().notifyError(), window.notification.style());
             assertEquals("external change", Files.readString(window.document));
+            assertEquals(List.of("draft original"), window.active().tabSession().model().snapshotLines());
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
 
             Path copy = directory.resolve("retry.txt");
             window.resize(24, 80);
-            window.event(KeyStroke.of(KeyStroke.Key.A, KeyStroke.Modifier.CTRL));
-            window.event(new TextInput(copy.toString()));
+            requestSaveAs(window, copy);
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
 
             assertEquals("draft original", Files.readString(copy));

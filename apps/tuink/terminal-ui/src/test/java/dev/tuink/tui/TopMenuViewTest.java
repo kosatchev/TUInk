@@ -204,7 +204,6 @@ class TopMenuViewTest {
                 "tuink.document.open-encoding",
                 "tuink.document.save",
                 "tuink.document.save-as",
-                "tuink.document.keep-external",
                 "tuink.document.update-external",
                 "tuink.document.format",
                 "tuink.document.reopen-encoding",
@@ -267,6 +266,7 @@ class TopMenuViewTest {
             List.of(
                 "tuink.settings.toggle-confirm-on-close",
                 "tuink.project-search.settings",
+                "tuink.settings.toggle-auto-reload-unmodified",
                 "tuink.settings.toggle-mouse",
                 "tuink.settings.toggle-right-click-clipboard",
                 "tuink.settings.toggle-file-history-notifications",

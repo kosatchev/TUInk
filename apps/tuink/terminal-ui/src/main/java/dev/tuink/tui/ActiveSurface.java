@@ -66,7 +66,6 @@ record ActiveSurface(PresentationId presentationId, Kind kind, Focus focus, Moda
             case EDIT_UNDO -> documentWritable() || frozenHistoryReady() && frozenCanUndo;
             case EDIT_REDO -> documentWritable() || frozenHistoryReady() && frozenCanRedo;
             case EDIT_TOGGLE_LINE_COMMENT -> documentWritable();
-            case DOCUMENT_KEEP_EXTERNAL -> externalNotice && externalReady();
             case DOCUMENT_UPDATE_EXTERNAL -> externalBound && externalReady();
             case SEARCH_REPLACE, SEARCH_REPLACE_ALL -> documentEditable();
             case EDIT_COPY, EDIT_SELECT_ALL -> focus != Focus.CONTROL;

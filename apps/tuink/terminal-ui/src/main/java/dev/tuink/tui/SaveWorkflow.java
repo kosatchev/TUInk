@@ -82,17 +82,27 @@ final class SaveWorkflow {
     record SaveSubmission(String filename, long filenameRevision) {}
 
     record SaveRequest(TuiDocumentSession session, DocumentIoCoordinator.Work operation, UiModalState origin, SavePurpose purpose,
-                       SaveSubmission submission) {
+                       SaveSubmission submission, boolean externalOverwrite) {
         SaveRequest(TuiDocumentSession session, DocumentIoCoordinator.Work operation, UiModalState origin, SavePurpose purpose) {
-            this(session, operation, origin, purpose, null);
+            this(session, operation, origin, purpose, null, false);
+        }
+
+        SaveRequest(TuiDocumentSession session, DocumentIoCoordinator.Work operation, UiModalState origin, SavePurpose purpose, SaveSubmission submission) {
+            this(session, operation, origin, purpose, submission, false);
         }
 
         TabSession tab() { return session.view(); }
 
+        SaveRequest inspectExternalOverwrite() throws IOException {
+            var work = session.document().io().beginSaveAs(operation.resource(), SaveDisposition.REPLACE_EXISTING,
+                origin.saveFormat() == DocumentSaveFormat.UTF8);
+            return new SaveRequest(session, work, origin, purpose, submission, true);
+        }
+
         boolean inspecting() { return operation.kind() == DocumentIoCoordinator.WorkKind.INSPECT; }
 
         SaveRequest submitted(String filename, long revision) {
-            return new SaveRequest(session, operation, origin, purpose, new SaveSubmission(filename, revision));
+            return new SaveRequest(session, operation, origin, purpose, new SaveSubmission(filename, revision), externalOverwrite);
         }
 
         DocumentIoCoordinator.Completion perform() throws IOException {
@@ -167,7 +177,7 @@ final class SaveWorkflow {
         }
         return switch (choice) {
             case SAVE -> approveOverwrite(context, modal);
-            case DISCARD -> cancelOverwrite(context, modal, modal.backToSaveAs());
+            case DISCARD -> cancelOverwrite(context, modal, approval != null && approval.request().externalOverwrite() ? UiModalState.none() : modal.backToSaveAs());
             case CANCEL -> cancelOverwrite(context, modal, UiModalState.none());
         };
     }
@@ -188,7 +198,7 @@ final class SaveWorkflow {
     }
 
     private static Result retainOverwrite(OverwriteApproval approval) {
-        UiModalState modal = saveAsOrigin(approval.request().origin())
+        UiModalState modal = overwriteOrigin(approval.request(), approval.request().origin())
             .confirmOverwrite(JvmDocumentStorage.pathOf(approval.inspection().requestedResource()))
             .bindTo(approval.request().session().viewId());
         return new Result(true, modal, -1, -1, SaveFlowController.TextInputEffect.none(),
@@ -264,8 +274,10 @@ final class SaveWorkflow {
                 return new Result(true, saveAsOrigin(origin), index, -1, SaveFlowController.TextInputEffect.none(),
                     Notice.error(conflict), false, true);
             }
-            if (inspection.requiresOverwriteConfirmation()) {
-                UiModalState confirmation = saveAsOrigin(origin).confirmOverwrite(JvmDocumentStorage.pathOf(inspection.requestedResource()));
+            if (inspection.requiresOverwriteConfirmation() || request.externalOverwrite()) {
+                UiModalState confirmation = overwriteOrigin(request, origin)
+                    .confirmOverwrite(JvmDocumentStorage.pathOf(inspection.requestedResource()));
+                if (request.externalOverwrite()) confirmation = confirmation.bindTo(request.session().viewId());
                 return new Result(true, confirmation, index, -1, SaveFlowController.TextInputEffect.none(),
                     Notice.clear(), false, false, null, new OverwriteApproval(request, inspection));
             }
@@ -273,6 +285,10 @@ final class SaveWorkflow {
         }
         if (transition instanceof DocumentIoCoordinator.Failed failed) {
             IOException failure = failed.failure();
+            if (!request.externalOverwrite() && failure instanceof dev.tuink.editor.storage.ExternalFileChangedException) {
+                try { return pending(request.inspectExternalOverwrite()); }
+                catch (IOException unavailable) { failure = unavailable; }
+            }
             if (failure instanceof ReadOnlyTarget readOnly) {
                 String suggestion = suggestWritableName(context, index, readOnly.target);
                 context.suggestions().rememberGenerated(request.tab(), suggestion);
@@ -329,7 +345,7 @@ final class SaveWorkflow {
             if (surviving.document() == request.session().document())
                 return new SaveRequest(surviving, request.operation(),
                     survivingOrigin(request.origin(), surviving.viewId()),
-                    request.purpose() == SavePurpose.CLOSE_TAB ? SavePurpose.CURRENT : request.purpose(), request.submission());
+                    request.purpose() == SavePurpose.CLOSE_TAB ? SavePurpose.CURRENT : request.purpose(), request.submission(), request.externalOverwrite());
         }
         return null;
     }
@@ -347,10 +363,10 @@ final class SaveWorkflow {
             request.session().document().io().cancel(inspection);
             return approvalFailure(context, request, origin, conflict);
         }
-        DocumentIoCoordinator.Transition transition = request.session().document().io().approve(inspection);
+        DocumentIoCoordinator.Transition transition = request.session().document().io().approve(inspection, request.externalOverwrite());
         if (transition instanceof DocumentIoCoordinator.Ready ready) {
             return pending(new SaveRequest(request.session(), ready.work(),
-                origin, request.purpose(), request.submission()));
+                origin, request.purpose(), request.submission(), request.externalOverwrite()));
         }
         if (transition instanceof DocumentIoCoordinator.Failed failed) {
             return approvalFailure(context, request, origin, SaveTargetPolicy.saveErrorMessage(failed.failure()));
@@ -365,6 +381,16 @@ final class SaveWorkflow {
 
     private static UiModalState saveAsOrigin(UiModalState modal) {
         return modal.isSaveOverwriteConfirm() ? modal.backToSaveAs() : modal;
+    }
+
+    private static UiModalState overwriteOrigin(SaveRequest request, UiModalState origin) {
+        UiModalState modal = saveAsOrigin(origin);
+        if (modal.isSaveAs()) return modal;
+        return switch (request.purpose()) {
+            case CURRENT, SAVE_AS -> UiModalState.saveAs();
+            case QUIT -> UiModalState.saveAsForQuit();
+            case CLOSE_TAB -> UiModalState.saveAsForCloseTab(origin.pendingCloseTabIndex());
+        };
     }
 
     private static UiModalState remapOrigin(UiModalState modal, int tabIndex) {

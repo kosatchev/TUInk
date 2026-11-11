@@ -144,6 +144,12 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(ui.rightClickClipboardSetting
                     ? "Right-click copy/paste enabled" : "Right-click copy/paste disabled");
             }
+            case SETTINGS_TOGGLE_AUTO_RELOAD_UNMODIFIED -> {
+                ui.autoReloadUnmodifiedFilesSetting = !ui.autoReloadUnmodifiedFilesSetting;
+                return DispatchResult.handled(ui.autoReloadUnmodifiedFilesSetting
+                    ? "Automatic reload of unmodified files enabled" : "Automatic reload of unmodified files disabled");
+            }
+
             case SETTINGS_TOGGLE_MOUSE -> {
                 if (!surface.mouseAvailable()) {
                     return DispatchResult.handled(

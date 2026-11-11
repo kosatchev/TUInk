@@ -165,8 +165,9 @@ local meaning in text fields, without application-specific event conversion.
 sidebar uses `MANAGE_FILES`; Open, folder-selection and move/copy-destination popup
 trees use `READ_ONLY`. Read-only trees permit navigation, selection and scrollbar
 capture, but cannot start file dragging or mutate files through their operations
-object. A writable tree distinguishes a completed click from a stationary 500 ms hold before
-movement. It paints a drag label and destination highlight, expands hovered
+object. A writable tree uses the shared stationary 500 ms hold before movement.
+Early motion cancels the move until release, even after returning to the starting
+cell and waiting. It paints a drag label and destination highlight, expands hovered
 folders after 700 ms and scrolls at the viewport edges. Only release over a valid
 destination emits one move intent. Escape, root/surface changes and geometry
 changes cancel the gesture; its own hover expansion and scrolling preserve it.
@@ -179,19 +180,20 @@ footer. Successful history notices are temporary and configurable; errors remain
 visible. The shared `NoticeBanner` accepts owner-defined action IDs and labels,
 with Dismiss as its default action. It has no file or editor semantics; each
 action has its own routed button, clipping, enabled state and optional focus.
-TUInk uses Dismiss for persistent deleted-file notices and Keep/Update for
-external changes. Both warnings occupy the document pane, independently of the
-sidebar and temporary history-notice preference. Layout reserves their actual
-heights, wraps action groups when needed and excludes clipped buttons from input.
+TUInk uses Dismiss for persistent deleted-file notices. External-change warnings
+have no buttons and use a wrapped plain banner with File → Update from disk
+(F1 → U) and File → Save (Ctrl+S) instructions. Both warnings occupy the document
+pane independently of sidebar and temporary history-notice preferences.
 
-Showing a notice never takes document focus or changes the caret, and Tab in
-Source keeps its editing behavior. Mouse buttons and File-menu Keep current text /
-Update from disk commands use the same asynchronous decision path. Update remains
-available for a bound document after Keep. Each changed disk version receives a
-new notice scope; a click can accept only the version whose scope was painted.
-Pending decisions disable buttons. Changed versions, stale edits and failed reads
-retain the buffer and unresolved warning. Accepted Keep/Update clears that warning;
-the deleted-file warning keeps its separate Dismiss/successful-save lifetime.
+Showing a notice never takes document focus or changes the caret. Source Tab
+keeps its editing behavior. Clean bound documents reload automatically by
+default; disabling the preference makes updates manual. Local edits, stale
+bindings and unsuccessful reads retain the buffer and warning. Successful reload
+or explicit save clears the external warning; cancelling does not. Saving over
+external changes uses the shared confirmation control with an explicit loss
+warning and Cancel selected initially. The write is authorized for the exact
+inspected version, and a later disk change refuses publication. Deleted-file
+notices keep their separate Dismiss/successful-save lifetime.
 
 Search is non-blocking and includes the editable document in its focus cycle.
 Save As and confirmation prompts are blocking: their focus cycles include the

@@ -18,6 +18,23 @@ class NoticeBannerTest {
     private static final CellStyle WARNING = new CellStyle(CellColor.BLACK, CellColor.BRIGHT_YELLOW, false, false);
     private static final Theme THEME = role -> WidgetThemeKeys.NOTICE_WARNING.equals(role) ? WARNING : null;
 
+    @Test void wrappedInstructionNoticeUsesMultipleRowsWithoutAddingButtonsOrTakingFocus() {
+        var banner = new NoticeBanner("Update: File → Update from disk (F1 → U). Keep: File → Save (Ctrl+S). 😀",
+            NoticeBanner.Severity.WARNING, List.of()).wrapped();
+        int height = banner.preferredHeight(24); assertTrue(height > 1);
+        var placed = banner.place(this, new Rect(4, 2, 24, height), SCREEN, true);
+        var cells = new CellBuffer(12, 60); placed.paint(new Canvas(cells), THEME, WidgetState.NORMAL);
+        assertTrue(placed.scope().targets().isEmpty()); assertFalse(placed.interactionReady());
+        assertEquals(banner.text(), placed.messageLines().stream().map(String::strip).collect(java.util.stream.Collectors.joining(" ")));
+        assertTrue(text(cells, new Rect(4, 2, 24, 1)).contains("Update: File"));
+        assertEquals(CellStyle.DEFAULT, cells.get(2, 3).style());
+        assertEquals(CellStyle.DEFAULT, cells.get(2 + height, 4).style());
+        for (int width = 1; width < 5; width++) {
+            int narrow = width;
+            assertDoesNotThrow(() -> banner.place(this, new Rect(0, 0, narrow, 2), SCREEN, true).paint(new Canvas(cells), THEME, WidgetState.NORMAL));
+        }
+    }
+
     @Test
     void paintsOnlyItsAllocationAndKeepsWarningAndDismissIndependentOfDocumentText() {
         var banner = new NoticeBanner("File deleted: draft.txt", NoticeBanner.Severity.WARNING);

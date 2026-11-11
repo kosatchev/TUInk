@@ -135,9 +135,6 @@ public class TerminalEditorApp {
     final DeletedDocumentNotices deletedNotices = new DeletedDocumentNotices();
     final DocumentPaths documentPaths = new DocumentPaths();
     final ExternalDocumentNotices externalNotices = new ExternalDocumentNotices();
-    static final NoticeBanner.Action EXTERNAL_KEEP_ACTION = new NoticeBanner.Action("keep", "Keep");
-    static final NoticeBanner.Action EXTERNAL_UPDATE_ACTION = new NoticeBanner.Action("update", "Update");
-    final FocusManager<NoticeBanner.Action> externalNoticeFocusManager = new FocusManager<>();
     private final Theme colorOverlayWidgetTheme = key -> resolveOverlayWidgetStyle(key, true);
     private final Theme monoOverlayWidgetTheme = key -> resolveOverlayWidgetStyle(key, false);
     final FocusManager<HelpOverlayInputRouter.Target> helpFocusManager = new FocusManager<>();
@@ -185,9 +182,9 @@ public class TerminalEditorApp {
 
     NoticeBanner externalNoticeBanner(dev.tuink.editor.document.DocumentId document) {
         var notice = externalNotices.notice(document);
-        return notice == null ? null : new NoticeBanner("File changed on disk: "
-            + PathPresentation.full(notice.path()) + ". Keep current text or update from disk.",
-            NoticeBanner.Severity.WARNING, List.of(EXTERNAL_KEEP_ACTION, EXTERNAL_UPDATE_ACTION));
+        return notice == null ? null : new NoticeBanner("File changed on disk. "
+            + "Update: File → Update from disk (F1 → U). "
+            + "Keep current text: File → Save (Ctrl+S).", NoticeBanner.Severity.WARNING, List.of()).wrapped();
     }
 
     Theme noticeWidgetTheme() {
@@ -1343,7 +1340,7 @@ public class TerminalEditorApp {
         if (surface.deletedNotice() != null)
             surface.deletedNotice().paint(canvas, noticeWidgetTheme(), WidgetState.NORMAL);
         if (surface.externalNotice() != null)
-            surface.externalNotice().paint(canvas, noticeWidgetTheme(), externalNoticeFocusManager);
+            surface.externalNotice().paint(canvas, noticeWidgetTheme(), dev.tuiframe.widget.WidgetState.NORMAL);
         var controlsTheme = surface.textLayout().prompt().theme();
         int controlsMark = canvas.save();
         try {
@@ -1685,6 +1682,13 @@ public class TerminalEditorApp {
             responsiveQuestionWidth(cols, availableRows));
         return ConfirmBarView.responsive(question, cols, availableRows,
             "Replace", "Choose another name", true, "Cancel", ConfirmBarInputRouter.Policy.overwrite().shortcuts());
+    }
+
+    ConfirmBarView buildExternalOverwriteConfirmBar(Path path, int cols, int availableRows) {
+        String question = ConfirmPromptText.wrappingFileQuestion("External changes will be destroyed. Overwrite ", path,
+            " with the current text?", responsiveQuestionWidth(cols, availableRows));
+        return ConfirmBarView.responsive(question, cols, availableRows, "Overwrite", "Cancel", false, "Cancel",
+            dev.tuink.tui.flow.ConfirmationShortcuts.SAVE);
     }
 
     private static int responsiveQuestionWidth(int cols, int availableRows) {
@@ -2085,7 +2089,8 @@ public class TerminalEditorApp {
             if (preview == null) { workspace.remove(viewId); return; }
             var captured = preview.uiState().preview.sourceForFreeze();
             var current = editor.documentSession().document().freezeSource();
-            var frozen = preview.freeze(captured.withBinding(current.binding(), current.reopenMode()));
+            var frozen = preview.freeze(captured.withBinding(current.binding(), current.reopenMode()),
+                editor.state().isDirty() || captured.text().revision() != current.text().revision());
             var next = new ArrayList<EditorWorkspace.Presentation<WindowTab>>();
             for (var item : workspace.presentations()) {
                 if (item.id().equals(editor.presentationId())) continue;

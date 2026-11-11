@@ -15,7 +15,7 @@ import java.util.function.Consumer;
 /** Revalidates an explicit owner decision without reading files on the window thread. */
 final class ExternalChangeController implements AutoCloseable {
     record Attempt(DocumentSaveSubject subject, ResourceBinding expected, long generation, Path path,
-        DocumentOpenMode mode, ExternalDocumentNotices.Notice notice, boolean update) {}
+        DocumentOpenMode mode, ExternalDocumentNotices.Notice notice, boolean automatic) {}
     record Outcome(Attempt attempt, ExternalFileObserver.ReadResult result, IOException failure) {}
 
     private final DocumentIoController io;
@@ -35,14 +35,14 @@ final class ExternalChangeController implements AutoCloseable {
 
     boolean busy() { return pending != null; }
 
-    boolean start(DocumentSaveSubject subject, ExternalDocumentNotices.Notice notice, boolean update) {
+    boolean start(DocumentSaveSubject subject, ExternalDocumentNotices.Notice notice, boolean automatic) {
         if (subject == null || pending != null || io.busy() || subject.io().busy()
             || subject.io().state() == DocumentIoCoordinator.State.STOPPED) return false;
         ResourceBinding binding = subject.binding();
         Path path = JvmDocumentStorage.pathOf(binding.resource());
         if (path == null || notice != null && (notice.subject() != subject || !notice.expected().equals(binding))) return false;
         if (notice != null && !notices.setBusy(notice, true)) return false;
-        Attempt attempt = new Attempt(subject, binding, generation(subject), path, subject.reopenMode(), notice, update);
+        Attempt attempt = new Attempt(subject, binding, generation(subject), path, subject.reopenMode(), notice, automatic);
         pending = attempt;
         DocumentOpenMode mode = attempt.mode();
         io.submit(() -> ExternalFileObserver.read(binding, path, mode), completion -> {

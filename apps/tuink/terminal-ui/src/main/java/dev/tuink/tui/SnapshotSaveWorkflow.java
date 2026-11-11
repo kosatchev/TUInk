@@ -41,7 +41,7 @@ final class SnapshotSaveWorkflow {
     enum SavePurpose { CURRENT, SAVE_AS }
 
     record Request(Owner owner, DocumentIoCoordinator.Work operation, UiModalState origin, SavePurpose purpose,
-                   SaveWorkflow.SaveSubmission submission) {
+                   SaveWorkflow.SaveSubmission submission, boolean externalOverwrite) {
         Request {
             Objects.requireNonNull(owner, "owner");
             Objects.requireNonNull(operation, "operation");
@@ -49,11 +49,19 @@ final class SnapshotSaveWorkflow {
             Objects.requireNonNull(purpose, "purpose");
         }
         Request(Owner owner, DocumentIoCoordinator.Work operation, UiModalState origin, SavePurpose purpose) {
-            this(owner, operation, origin, purpose, null);
+            this(owner, operation, origin, purpose, null, false);
+        }
+        Request(Owner owner, DocumentIoCoordinator.Work operation, UiModalState origin, SavePurpose purpose, SaveWorkflow.SaveSubmission submission) {
+            this(owner, operation, origin, purpose, submission, false);
+        }
+        Request inspectExternalOverwrite() throws IOException {
+            var work = owner.subject().io().beginSaveAs(operation.resource(), SaveDisposition.REPLACE_EXISTING,
+                origin.saveFormat() == DocumentSaveFormat.UTF8);
+            return new Request(owner, work, origin, purpose, submission, true);
         }
         boolean inspecting() { return operation.kind() == DocumentIoCoordinator.WorkKind.INSPECT; }
         Request submitted(String filename, long revision) {
-            return new Request(owner, operation, origin, purpose, new SaveWorkflow.SaveSubmission(filename, revision));
+            return new Request(owner, operation, origin, purpose, new SaveWorkflow.SaveSubmission(filename, revision), externalOverwrite);
         }
         DocumentIoCoordinator.Completion perform() throws IOException {
             if (inspecting()) {
@@ -129,7 +137,7 @@ final class SnapshotSaveWorkflow {
         }
         if (choice == ConfirmChoice.SAVE) return approve(context, approval.request(), approval.inspection());
         approval.request().owner().subject().io().cancel(approval.inspection());
-        return result(choice == ConfirmChoice.DISCARD ? modal.backToSaveAs() : UiModalState.none(), SaveWorkflow.Notice.clear());
+        return result(choice == ConfirmChoice.DISCARD && !approval.request().externalOverwrite() ? modal.backToSaveAs() : UiModalState.none(), SaveWorkflow.Notice.clear());
     }
 
     static Result encodingChoice(UiModalState modal, ConfirmChoice choice) {
@@ -154,20 +162,25 @@ final class SnapshotSaveWorkflow {
                 request.owner().subject().io().cancel(approval.confirmation());
                 return result(saveAsOrigin(request.origin()), SaveWorkflow.Notice.error(conflict), true);
             }
-            if (approval.confirmation().requiresOverwriteConfirmation()) {
+            if (approval.confirmation().requiresOverwriteConfirmation() || request.externalOverwrite()) {
                 Path target = filePath(approval.confirmation().requestedResource());
                 if (target == null) {
                     request.owner().subject().io().cancel(approval.confirmation());
                     return result(saveAsOrigin(request.origin()), SaveWorkflow.Notice.error(
                         "This provider requires its own overwrite approval. Choose a local file with Save As."), true);
                 }
-                var modal = saveAsOrigin(request.origin()).confirmOverwrite(target);
+                var origin = saveAsOrigin(request.origin());
+                var modal = (origin.isSaveAs() ? origin : UiModalState.saveAs()).confirmOverwrite(target);
                 return new Result(modal, SaveFlowController.TextInputEffect.none(), SaveWorkflow.Notice.clear(), false,
                     null, new OverwriteApproval(request, approval.confirmation()), false, null);
             }
             return approve(context, request, approval.confirmation());
         }
         if (transition instanceof DocumentIoCoordinator.Failed failed) {
+            if (!request.externalOverwrite() && failed.failure() instanceof dev.tuink.editor.storage.ExternalFileChangedException) {
+                try { return pending(request.inspectExternalOverwrite()); }
+                catch (IOException unavailable) { return result(UiModalState.none(), SaveWorkflow.Notice.error(unavailable.getMessage())); }
+            }
             if (failed.failure() instanceof DocumentEncodingException && request.origin().saveFormat() != DocumentSaveFormat.UTF8) {
                 var modal = (request.purpose() == SavePurpose.CURRENT ? UiModalState.saveAs() : saveAsOrigin(request.origin())).offerUtf8();
                 var filename = request.purpose() == SavePurpose.CURRENT
@@ -196,9 +209,9 @@ final class SnapshotSaveWorkflow {
             request.owner().subject().io().cancel(inspection);
             return result(saveAsOrigin(request.origin()), SaveWorkflow.Notice.error(conflict), true);
         }
-        var transition = request.owner().subject().io().approve(inspection);
+        var transition = request.owner().subject().io().approve(inspection, request.externalOverwrite());
         if (transition instanceof DocumentIoCoordinator.Ready ready) {
-            return pending(new Request(request.owner(), ready.work(), request.origin(), request.purpose(), request.submission()));
+            return pending(new Request(request.owner(), ready.work(), request.origin(), request.purpose(), request.submission(), request.externalOverwrite()));
         }
         return complete(context, request, transition);
     }

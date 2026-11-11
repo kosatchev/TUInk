@@ -48,8 +48,10 @@ final class PreviewTab implements WindowTab {
     Source source() { return source; }
     long generation() { return generation; }
 
-    PreviewTab freeze(FrozenDocumentSource captured) {
-        return new PreviewTab(presentationId, groupId, new ClosedSnapshot(FrozenDocumentSession.create(captured)),
+    PreviewTab freeze(FrozenDocumentSource captured) { return freeze(captured, false); }
+
+    PreviewTab freeze(FrozenDocumentSource captured, boolean retainedLocalEdits) {
+        return new PreviewTab(presentationId, groupId, new ClosedSnapshot(FrozenDocumentSession.create(captured, retainedLocalEdits)),
             Math.incrementExact(generation), uiState);
     }
 

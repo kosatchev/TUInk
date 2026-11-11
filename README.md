@@ -274,12 +274,11 @@ an error without changing open documents. Reads remain bounded if the file grows
 If an edit leaves an empty line between bare CR and LF endings, that empty
 line's ending becomes CRLF so saving and reopening retain both line breaks.
 
-Normal saves compare the destination with the bytes last opened, saved, or
-explicitly acknowledged with Keep/Update.
-A change detected during these checks retains your edits and reports a
-conflict. Use the external-change warning's Keep/Update actions, or Save As with
-a different name to keep both versions. This check also applies to recovered
-documents. Locks coordinate
+Normal saves compare the destination with the bytes last loaded or saved.
+An external conflict retains your edits and requires explicit confirmation
+before replacing the inspected disk version. Use File → Update from disk to
+reload instead, or Save As with a different name to keep both versions. These
+checks also apply to recovered documents. Locks coordinate
 TUInk instances of the same user across configuration profiles. Other editors
 do not use these locks: a change after the final check can still be overwritten.
 Save As checks existing destinations with streaming reads. Longer checks and
@@ -670,24 +669,27 @@ seconds when metadata stays unchanged, using bounded reads. Tab activation and
 **Explorer → Refresh explorer** request a fresh check. These are periodic reads,
 without an OS filesystem watcher; inactive documents are checked when activated.
 
-Changed bytes show a persistent yellow banner below Source or Preview with
-**Keep** and **Update**. Keep retains the current text and format and acknowledges
-that exact disk version. The retained text stays dirty when it differs, and the
-next explicit Save can replace the acknowledged version after the usual guarded
-checks. Update accepts the disk text and format as one Undo step and marks that
-version clean. Earlier local Undo history and the historical gutter markers from
-the original open remain available. Undo restores text and format; it keeps the
-newly acknowledged disk baseline, so restoring older text makes the document dirty.
-**File → Keep current text** and **File → Update from disk** provide keyboard access;
-Update from disk remains available after Keep.
+**Settings → Auto reload unmodified files** is enabled by default. A file without
+local edits reloads automatically, keeping the cursor and scroll within the new
+text. Dirty documents keep their text and show a persistent yellow warning.
+Turning the setting off makes all external updates manual.
 
-Live Preview follows the shared Source decision. A frozen Preview supports the
-same Keep/Update choices and session Undo/Redo for those changes, with Save/Discard/
-Cancel guarding unsaved text on close or quit. Its dirty text also participates in
-recovery. Successful saves from TUInk update the baseline without showing a false
-external warning. A newer disk version, intervening edits, read or decoding errors,
-and oversized files retain the current buffer and unresolved warning. No external
-change reloads text automatically.
+The warning has no buttons. It explains **Update: File → Update from disk
+(F1 → U)** and **Keep current text: File → Save (Ctrl+S)**. Saving the current
+text over external changes requires explicit confirmation that those changes
+will be destroyed. Cancelling, editing, or returning the disk to its earlier
+bytes does not dismiss the warning; successful reload or explicit save does.
+A further disk change after confirmation refuses the write and preserves the
+draft. **Update from disk** remains available without a warning.
+
+Update accepts disk text and format as one Undo step and marks that version
+clean. Earlier local Undo history and historical gutter markers remain
+available. Undo restores text and format while retaining the accepted disk
+baseline. Live Preview follows its Source; a frozen Preview has its own
+external Undo/Redo and supports the same update and confirmed-save commands.
+Local drafts in retained Preview are protected from automatic reload. Successful
+TUInk saves update the baseline without producing a false external warning.
+Read/decoding failures and intervening edits retain the current text.
 
 Explorer follows File in the top menu; F1–F7 retain their existing command
 assignments. Search, Save As, document confirmations, notifications and status

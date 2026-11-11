@@ -180,8 +180,10 @@ class SaveAsWorkspaceIntegrationTest {
             Files.createSymbolicLink(link, other.getFileName());
 
             window.command(TuinkCommand.DOCUMENT_SAVE);
-            assertTrue(window.notification.message.contains("File changed outside TUInk"));
+            window.await(() -> window.selected().uiState().modalState.isSaveOverwriteConfirm());
+            assertTrue(window.selected().uiState().overwriteApproval.request().externalOverwrite());
             assertTrue(window.active().state().isDirty());
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
             SaveWorkflowIntegrationTest.submitFilename(window, other);
 
             assertTrue(window.promptText().contains("Overwrite"));
@@ -198,7 +200,7 @@ class SaveAsWorkspaceIntegrationTest {
     }
 
     @Test
-    void saveAsTheOriginalAliasOrChangedLoadedTargetStillRefusesToBypassTheBaseline() throws Exception {
+    void saveAsTheOriginalAliasOrChangedLoadedTargetRequiresExplicitExternalApproval() throws Exception {
         assumeTrue(Files.getFileStore(directory).supportsFileAttributeView("posix"));
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("original"))) {
             Path other = Files.writeString(directory.resolve("unrelated.txt"), "other original");
@@ -211,8 +213,8 @@ class SaveAsWorkspaceIntegrationTest {
 
             for (Path target : List.of(link, window.document)) {
                 SaveWorkflowIntegrationTest.submitFilename(window, target);
-                assertTrue(window.notification.message.contains("File changed outside TUInk"));
-                assertTrue(window.screenRow(window.height - 2).startsWith("Save As: "));
+                window.await(() -> window.selected().uiState().modalState.isSaveOverwriteConfirm());
+                assertTrue(window.selected().uiState().overwriteApproval.request().externalOverwrite());
                 assertEquals("other original", Files.readString(other));
                 assertEquals("external original change", Files.readString(window.document));
                 assertTrue(window.active().state().isDirty());

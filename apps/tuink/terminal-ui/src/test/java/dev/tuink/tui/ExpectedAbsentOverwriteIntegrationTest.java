@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuiframe.input.KeyStroke;
+
 import dev.tuink.storage.jvm.JvmDocumentStorage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -82,9 +84,11 @@ class ExpectedAbsentOverwriteIntegrationTest {
             Files.writeString(target, "changed after the successful save");
             window.command(TuinkCommand.DOCUMENT_SAVE);
 
-            assertTrue(window.notification.message.contains("File changed outside TUInk"), window.notification.message);
+            window.await(() -> window.selected().uiState().modalState.isSaveOverwriteConfirm());
+            assertTrue(window.selected().uiState().overwriteApproval.request().externalOverwrite());
             assertEquals("changed after the successful save", Files.readString(target));
             assertTrue(window.active().state().isDirty());
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
         }
     }
 

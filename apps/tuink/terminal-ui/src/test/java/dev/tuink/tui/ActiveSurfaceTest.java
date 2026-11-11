@@ -105,13 +105,10 @@ class ActiveSurfaceTest {
 
     @Test void externalActionsRemainAvailableAfterKeepWhileFrozenHistoryStaysInItsContentScope() {
         var source = TestSurfaces.source(new UiSessionState());
-        assertFalse(source.allows(TuinkCommand.DOCUMENT_KEEP_EXTERNAL));
         assertFalse(source.allows(TuinkCommand.DOCUMENT_UPDATE_EXTERNAL));
         var changed = source.withExternal(true, true, false, false);
-        assertTrue(changed.allows(TuinkCommand.DOCUMENT_KEEP_EXTERNAL));
         assertTrue(changed.allows(TuinkCommand.DOCUMENT_UPDATE_EXTERNAL));
         var kept = changed.withExternal(true, false, false, false);
-        assertFalse(kept.allows(TuinkCommand.DOCUMENT_KEEP_EXTERNAL));
         assertTrue(kept.allows(TuinkCommand.DOCUMENT_UPDATE_EXTERNAL));
         assertTrue(kept.withRuntime(false, false).withFocus(ActiveSurface.Focus.CONTROL)
             .allows(TuinkCommand.DOCUMENT_UPDATE_EXTERNAL));
@@ -124,7 +121,6 @@ class ActiveSurfaceTest {
         var locked = new ActiveSurface(frozen.presentationId(), frozen.kind(), frozen.focus(),
             ActiveSurface.ModalScope.WINDOW, true, true, true, true, true, false, frozen.language())
             .withExternal(true, true, true, true);
-        assertFalse(locked.allows(TuinkCommand.DOCUMENT_KEEP_EXTERNAL));
         assertFalse(locked.allows(TuinkCommand.DOCUMENT_UPDATE_EXTERNAL));
         assertFalse(locked.allows(TuinkCommand.EDIT_UNDO));
     }

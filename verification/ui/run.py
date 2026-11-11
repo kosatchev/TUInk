@@ -183,6 +183,53 @@ class Regressions:
             session.finish()
         assert document.read_text(encoding="utf-8") == "edited " + original
 
+    def external_file_changes(self):
+        document = self.fixture("external-change", "original")
+        with self.session("external-change", document, timeout=60) as session:
+            document.write_text("external clean", encoding="utf-8")
+            session.expect(lambda: "external clean" in session.screen.text, "default automatic clean reload")
+            session.send(b"draft ")
+            document.write_text("external dirty", encoding="utf-8")
+            session.expect(lambda: "File changed on disk." in session.screen.text, "persistent dirty-file warning")
+            assert "F1 → U" in session.screen.text and "Ctrl+S" in session.screen.text
+            assert "[Keep]" not in session.screen.text and "[Update]" not in session.screen.text
+            session.send(b"\x13")
+            session.expect(lambda: "External changes will be destroyed" in session.screen.text,
+                           "explicit external overwrite confirmation")
+            assert document.read_text(encoding="utf-8") == "external dirty"
+            session.send(b"\x1b", 0.7)
+            session.expect(lambda: "File changed on disk." in session.screen.text and "[Overwrite]" not in session.screen.text,
+                           "cancelling preserves the warning")
+            session.send(b"\x13")
+            session.expect(lambda: "[Overwrite]" in session.screen.text, "fresh overwrite approval")
+            session.send(b"\x13")
+            session.expect(lambda: document.read_text(encoding="utf-8") == "draft external clean"
+                           and "File changed on disk." not in session.screen.text, "confirmed save clears the warning")
+            session.send(b"\x1b[15~")
+            session.expect(lambda: "Auto reload unmodified files" in session.screen.text, "auto-reload setting")
+            row, line = next((row, line) for row, line in enumerate(session.screen.lines) if "Auto reload unmodified files" in line)
+            column = line.index("Auto reload unmodified files")
+            session.mouse(0, row, column); session.mouse(0, row, column, release=True)
+            document.write_text("manual disk version", encoding="utf-8")
+            session.expect(lambda: "File changed on disk." in session.screen.text, "clean file with auto-reload disabled")
+            assert "draft external clean" in session.screen.text
+            session.send(b"\x1bOPu")
+            session.expect(lambda: "manual disk version" in session.screen.text and "File changed on disk." not in session.screen.text,
+                           "F1 then U reloads without moving focus into the warning")
+            session.snapshot("manual-update")
+            session.finish()
+            home = session.home
+        settings = home / ".config/tuink/tuink.properties"
+        assert "ui.autoReloadUnmodifiedFiles=false" in settings.read_text(encoding="ascii")
+        with self.session("external-change-restarted", document, home=home) as session:
+            document.write_text("after restart", encoding="utf-8")
+            session.expect(lambda: "File changed on disk." in session.screen.text, "persisted manual reload preference")
+            assert "manual disk version" in session.screen.text
+            session.send(b"\x1bOPu")
+            session.expect(lambda: "after restart" in session.screen.text and "File changed on disk." not in session.screen.text,
+                           "manual update in a new process")
+            session.finish()
+
     def project_search(self):
         directory = self.root / "search-project"
         directory.mkdir()
@@ -291,6 +338,13 @@ class Regressions:
             session.expect(lambda: not session.screen.cursor_visible, "search results focus without a caret")
             session.send(b"\x1b[D\x1b[C")
             session.expect(lambda: not session.screen.cursor_visible, "search disclosure keeps the caret hidden")
+            session.send(b"\x1b[15~")
+            session.expect(lambda: "Auto reload unmodified files" in session.screen.text,
+                           "Settings menu above the focused search list")
+            session.send(b"\x1b[27u")
+            session.expect(lambda: "Auto reload unmodified files" not in session.screen.text
+                           and not session.screen.cursor_visible,
+                           "closing the menu restores results focus instead of moving it to the query")
             session.send(b"\x1b[102;6u")
             session.expect(lambda: session.screen.cursor_visible, "returning to the query restores its caret")
             assert header("Files") < header("Search")
@@ -708,9 +762,13 @@ class Regressions:
             alias.unlink()
             alias.symlink_to(second.name)
             session.send(b"\x13")
-            session.expect(lambda: "File changed outside TUInk" in session.screen.text, "normal save conflict")
+            session.expect(lambda: "External changes will be destroyed" in session.screen.text
+                           and "[Overwrite]" in session.screen.text, "explicit external overwrite confirmation")
             assert first.read_text(encoding="utf-8") == "first original"
             assert second.read_text(encoding="utf-8") == "second original"
+            session.send(b"\x1b[27u")
+            session.expect(lambda: "External changes will be destroyed" not in session.screen.text,
+                           "cancelling the external overwrite")
             session.send(b"\x0b\x01\x1b[200~" + str(second).encode() + b"\x1b[201~\r")
             session.expect(lambda: "Overwrite" in session.screen.text, "confirmation for the newly chosen target")
             session.send(b"y")
@@ -2321,7 +2379,7 @@ class Regressions:
         assert document.read_text(encoding="utf-8") == original
 
 
-SCENARIOS = ("reading", "focus", "field", "resize", "large-wrap", "tabs", "folder-explorer", "project-search", "regex-search", "tool-palettes", "search-interface", "picker-navigation", "path-dialogs", "tab-scoped-ui", "history", "grapheme-edit-caret", "selection-autoscroll", "long-copy-name", "navigation", "fragmented-keys", "quit-confirmation", "gutter-idle", "paste", "settings", "settings-conflict", "recovery", "recovery-format5", "recovery-memory", "linux-keys", "enhanced-text", "long-unicode-edit", "save-as-workspace", "settings-memory", "syntax-memory", "unix-path-recovery", "literal-indentation", "field-memory", "document-caption", "save-name-suggestion", "replacement-memory", "paste-memory", "recovery-lock-cleanup", "xdg-profile", "cli-path-identity", "save-as-retarget", "legacy-encoding", "document-format", "format-errors", "format-reopen", "field-edit-caret", "field-memory-growth", "identical-replace-budget", "clipboard-memory", "cpp-raw-indentation", "terminal-diagnostics", "terminal-attributes", "startup-dependencies")
+SCENARIOS = ("reading", "focus", "external-file-changes", "field", "resize", "large-wrap", "tabs", "folder-explorer", "project-search", "regex-search", "tool-palettes", "search-interface", "picker-navigation", "path-dialogs", "tab-scoped-ui", "history", "grapheme-edit-caret", "selection-autoscroll", "long-copy-name", "navigation", "fragmented-keys", "quit-confirmation", "gutter-idle", "paste", "settings", "settings-conflict", "recovery", "recovery-format5", "recovery-memory", "linux-keys", "enhanced-text", "long-unicode-edit", "save-as-workspace", "settings-memory", "syntax-memory", "unix-path-recovery", "literal-indentation", "field-memory", "document-caption", "save-name-suggestion", "replacement-memory", "paste-memory", "recovery-lock-cleanup", "xdg-profile", "cli-path-identity", "save-as-retarget", "legacy-encoding", "document-format", "format-errors", "format-reopen", "field-edit-caret", "field-memory-growth", "identical-replace-budget", "clipboard-memory", "cpp-raw-indentation", "terminal-diagnostics", "terminal-attributes", "startup-dependencies")
 
 
 def classpath_manifest(classpath):

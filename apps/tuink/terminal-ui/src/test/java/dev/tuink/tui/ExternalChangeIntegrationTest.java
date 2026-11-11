@@ -20,9 +20,97 @@ import org.junit.jupiter.api.io.TempDir;
 class ExternalChangeIntegrationTest {
     @TempDir Path directory;
 
+    @Test void retargetedAliasNoticeRequiresConfirmationAndCancelPreservesBothFiles() throws Exception {
+        Path first = Files.writeString(directory.resolve("first.txt"), "original");
+        Path second = Files.writeString(directory.resolve("second.txt"), "other original");
+        Path alias = Files.createSymbolicLink(directory.resolve("alias.txt"), first);
+        try (var window = new EditorWindowFixture(directory, "alias.txt", false, List.of("original"))) {
+            window.ui.autoReloadUnmodifiedFilesSetting = false;
+            window.event(new TextInput("draft "));
+            var id = TerminalEditorApp.documentId(window.selected());
+            Files.delete(alias);
+            Files.createSymbolicLink(alias, second);
+            awaitNotice(window, id);
+            window.command(TuinkCommand.DOCUMENT_SAVE);
+            window.await(() -> window.selected().uiState().modalState.isSaveOverwriteConfirm());
+            assertEquals("original", Files.readString(first));
+            assertEquals("other original", Files.readString(second));
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            assertEquals(List.of("draft original"), lines(window));
+            assertTrue(window.active().state().isDirty());
+            assertTrue(window.host.externalNotices.visible(id));
+            assertEquals("original", Files.readString(first));
+            assertEquals("other original", Files.readString(second));
+            window.command(TuinkCommand.DOCUMENT_SAVE);
+            window.await(() -> window.selected().uiState().modalState.isSaveOverwriteConfirm());
+            window.event(ctrl(KeyStroke.Key.S));
+            window.await(() -> !window.documentIo.busy() && !window.active().state().isDirty());
+            assertEquals("original", Files.readString(first));
+            assertEquals("draft original", Files.readString(second));
+            assertFalse(window.host.externalNotices.visible(id));
+        }
+    }
+
+    @Test void diskChangesAfterConfirmationRefusePublicationAndKeepTheWarningUntilAFreshSave() throws Exception {
+        var pending = new ArrayDeque<Runnable>();
+        try (var window = new EditorWindowFixture(directory, false, List.of("original"), pending::add)) {
+            window.ui.autoReloadUnmodifiedFilesSetting = false; window.event(new TextInput("draft "));
+            var id = TerminalEditorApp.documentId(window.selected());
+            Files.writeString(window.document, "external"); awaitNotice(window, id);
+            window.command(TuinkCommand.DOCUMENT_SAVE); assertEquals(1, pending.size());
+            pending.remove().run(); window.frame();
+            assertTrue(window.selected().uiState().modalState.isSaveOverwriteConfirm());
+            window.event(ctrl(KeyStroke.Key.S)); assertEquals(1, pending.size());
+            Files.writeString(window.document, "newer external version");
+            pending.remove().run(); window.frame();
+            assertEquals("newer external version", Files.readString(window.document));
+            assertTrue(window.active().state().isDirty()); assertTrue(window.host.externalNotices.visible(id));
+            assertEquals(List.of("draft original"), lines(window));
+            window.command(TuinkCommand.DOCUMENT_SAVE); pending.remove().run(); window.frame();
+            assertTrue(window.selected().uiState().modalState.isSaveOverwriteConfirm());
+            window.event(ctrl(KeyStroke.Key.S)); pending.remove().run(); window.frame();
+            assertEquals("draft original", Files.readString(window.document)); assertFalse(window.host.externalNotices.visible(id));
+        }
+    }
+
+    @Test void frozenPreviewAlsoRequiresExplicitSaveConfirmationAndKeepsItsWarningOnCancel() throws Exception {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("# Original"))) {
+            window.ui.autoReloadUnmodifiedFilesSetting = false;
+            var preview = freeze(window); var subject = ((PreviewTab.ClosedSnapshot) preview.source()).subject();
+            Files.writeString(window.document, "# External"); awaitNotice(window, subject.documentId());
+            window.event(ctrl(KeyStroke.Key.S));
+            window.await(() -> preview.uiState().modalState.isSaveOverwriteConfirm());
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            assertTrue(window.host.externalNotices.visible(subject.documentId())); assertEquals("# External", Files.readString(window.document));
+            window.event(ctrl(KeyStroke.Key.S)); window.await(() -> preview.uiState().modalState.isSaveOverwriteConfirm());
+            window.event(ctrl(KeyStroke.Key.S));
+            window.await(() -> !window.documentIo.busy() && !window.host.externalNotices.visible(subject.documentId()));
+            assertEquals("# Original", Files.readString(window.document)); assertFalse(subject.unsavedExternalChanges());
+            assertTrue(window.tabs.isEmpty());
+        }
+    }
+
+    @Test void externalOverwriteConfirmationRetainsCloseAndQuitContinuations() throws Exception {
+        for (boolean quit : List.of(false, true)) {
+            try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
+                window.command(TuinkCommand.TAB_NEW); window.command(TuinkCommand.TAB_PREVIOUS);
+                window.event(new TextInput("draft ")); var id = TerminalEditorApp.documentId(window.selected());
+                Files.writeString(window.document, "external"); awaitNotice(window, id);
+                window.command(quit ? TuinkCommand.APP_QUIT : TuinkCommand.TAB_CLOSE);
+                window.event(ctrl(KeyStroke.Key.S));
+                window.await(() -> screenContains(window, "External changes will be destroyed"));
+                assertEquals("external", Files.readString(window.document));
+                window.event(ctrl(KeyStroke.Key.S));
+                window.await(() -> !window.documentIo.busy() && (quit ? !window.controller.running() : window.tabs.size() == 1));
+                assertEquals("draft original", Files.readString(window.document));
+            }
+        }
+    }
+
     @Test
-    void idleObservationAndMouseKeepPreserveLocalTextAndAcknowledgeOnlyTheShownDiskVersion() throws Exception {
+    void noticeHasInstructionsAndOnlyConfirmedSaveReplacesExternalText() throws Exception {
         try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
+            window.ui.autoReloadUnmodifiedFilesSetting = false;
             window.event(new TextInput("local "));
             var subject = window.active().documentSession().document();
             var id = subject.documentId();
@@ -34,25 +122,33 @@ class ExternalChangeIntegrationTest {
             Files.writeString(window.document, "external version one");
             awaitNotice(window, id);
             var first = window.host.externalNotices.notice(id);
-            int row = row(window, "File changed on disk:");
+            int row = row(window, "File changed on disk.");
             int left = window.ui.sidebar.placement.documentBounds().x();
-            assertEquals(left, window.screenRow(row).indexOf("File changed on disk:"));
+            assertEquals(left, window.screenRow(row).indexOf("File changed on disk."));
             assertEquals(window.host.styles.windows().notifyWarning(), window.screenStyle(row, left));
             assertEquals(sidebarHeight, window.ui.sidebar.placement.bounds().height());
             assertEquals(List.of("local original"), lines(window));
             assertTrue(window.active().state().isDirty());
 
-            click(window, "[Keep]");
-            decisionComplete(window, id);
-            assertEquals(cursor, window.active().state().getCursor());
-            assertEquals(List.of("local original"), lines(window));
-            assertEquals("external version one", Files.readString(window.document));
-            assertTrue(window.active().state().isDirty());
-            pump(window, 1_150);
-            assertFalse(window.host.externalNotices.visible(id), "The acknowledged version must not warn repeatedly");
+            assertTrue(screenContains(window, "F1 → U"));
+            assertTrue(screenContains(window, "Ctrl+S"));
+            assertFalse(screenContains(window, "[Keep]"));
+            assertFalse(screenContains(window, "[Update]"));
             window.command(TuinkCommand.DOCUMENT_SAVE);
+            window.await(() -> window.selected().uiState().modalState.isSaveOverwriteConfirm());
+            String prompt = java.util.stream.IntStream.range(0, window.height).mapToObj(window::screenRow)
+                .map(line -> line.substring(left).strip()).collect(java.util.stream.Collectors.joining(" ")).replaceAll(" +", " ");
+            assertTrue(prompt.contains("External changes will be destroyed"), prompt);
+            assertEquals("external version one", Files.readString(window.document));
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            pump(window, 1_150);
+            assertTrue(window.host.externalNotices.visible(id), "Cancelling must retain the warning");
+            window.command(TuinkCommand.DOCUMENT_SAVE);
+            window.await(() -> window.selected().uiState().modalState.isSaveOverwriteConfirm());
+            window.event(ctrl(KeyStroke.Key.S));
             window.await(() -> !window.documentIo.busy() && !window.active().state().isDirty());
-            assertEquals("local original", Files.readString(window.document), "Keep makes the next explicit Save replace the accepted version");
+            assertEquals(cursor, window.active().state().getCursor());
+            assertEquals("local original", Files.readString(window.document));
             assertFalse(window.host.externalNotices.visible(id));
 
             Files.writeString(window.document, "external version two");
@@ -65,11 +161,12 @@ class ExternalChangeIntegrationTest {
     @Test
     void updateIsOneUndoStepWithACleanDiskBaselineAndHistoricalGutter() throws Exception {
         try (var window = new EditorWindowFixture(directory, false, List.of("original", "second"))) {
+            window.ui.autoReloadUnmodifiedFilesSetting = false;
             var subject = window.active().documentSession().document();
             var id = subject.documentId();
             Files.writeString(window.document, "external\nchanged second");
             awaitNotice(window, id);
-            click(window, "[Update]");
+            window.command(TuinkCommand.DOCUMENT_UPDATE_EXTERNAL);
             decisionComplete(window, id);
             assertEquals(List.of("external", "changed second"), lines(window));
             assertFalse(window.active().state().isDirty());
@@ -90,6 +187,7 @@ class ExternalChangeIntegrationTest {
     @Test
     void updatePreservesEarlierLocalUndoHistoryAndRedoReturnsToTheAcceptedVersion() throws Exception {
         try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
+            window.ui.autoReloadUnmodifiedFilesSetting = false;
             window.event(new TextInput("local "));
             var id = TerminalEditorApp.documentId(window.selected());
             Files.writeString(window.document, "external replacement");
@@ -115,6 +213,7 @@ class ExternalChangeIntegrationTest {
     @Test
     void ownAtomicSaveDoesNotProduceAnExternalWarningOnTheNextIdlePoll() throws Exception {
         try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
+            window.ui.autoReloadUnmodifiedFilesSetting = false;
             window.event(new TextInput("saved "));
             window.command(TuinkCommand.DOCUMENT_SAVE);
             window.await(() -> !window.documentIo.busy() && !window.active().state().isDirty());
@@ -122,7 +221,7 @@ class ExternalChangeIntegrationTest {
             pump(window, 1_250);
             assertEquals("saved original", Files.readString(window.document));
             assertFalse(window.host.externalNotices.visible(id));
-            assertFalse(screenContains(window, "File changed on disk:"));
+            assertFalse(screenContains(window, "File changed on disk."));
             assertEquals(List.of("saved original"), lines(window));
         }
     }
@@ -130,6 +229,7 @@ class ExternalChangeIntegrationTest {
     @Test
     void updateFromLivePreviewChangesTheSharedSourceAndSourceUndoRebuildsPreview() throws Exception {
         try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("# Original"))) {
+            window.ui.autoReloadUnmodifiedFilesSetting = false;
             var source = window.active();
             var id = source.documentSession().document().documentId();
             window.command(TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW);
@@ -137,7 +237,7 @@ class ExternalChangeIntegrationTest {
             var presentation = window.selected().presentationId();
             Files.writeString(window.document, "# Updated\n\nexternal body");
             awaitNotice(window, id);
-            click(window, "[Update]");
+            window.command(TuinkCommand.DOCUMENT_UPDATE_EXTERNAL);
             decisionComplete(window, id);
             window.await(() -> window.preview().ready() && screenContains(window, "external body"));
             assertEquals(presentation, window.selected().presentationId());
@@ -159,15 +259,17 @@ class ExternalChangeIntegrationTest {
     }
 
     @Test
-    void frozenKeepUpdateAndUndoRetainCloseQuitGuardsAndSaveTheBoundResource() throws Exception {
+    void frozenUpdateAndUndoRetainCloseQuitGuardsAndSaveTheBoundResource() throws Exception {
         try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("# Original"))) {
+            window.ui.autoReloadUnmodifiedFilesSetting = false;
             PreviewTab preview = freeze(window);
             var subject = ((PreviewTab.ClosedSnapshot) preview.source()).subject();
             var id = subject.documentId();
             Files.writeString(window.document, "# External");
             awaitNotice(window, id);
-            click(window, "[Keep]");
+            window.command(TuinkCommand.DOCUMENT_UPDATE_EXTERNAL);
             decisionComplete(window, id);
+            window.event(ctrl(KeyStroke.Key.Z));
             assertEquals(List.of("# Original"), subject.source().text().lines());
             assertTrue(subject.unsavedExternalChanges());
             assertTrue(window.host.toPresentationTabItems(window.context, null).getFirst().dirty());
@@ -210,6 +312,7 @@ class ExternalChangeIntegrationTest {
     void aNewDiskVersionDuringDecisionIsShownInsteadOfAcceptingTheUnpaintedVersion() throws Exception {
         var pending = new ArrayDeque<Runnable>();
         try (var window = new EditorWindowFixture(directory, false, List.of("original"), pending::add)) {
+            window.ui.autoReloadUnmodifiedFilesSetting = false;
             var id = TerminalEditorApp.documentId(window.selected());
             Files.writeString(window.document, "external one");
             awaitNotice(window, id);
@@ -237,6 +340,7 @@ class ExternalChangeIntegrationTest {
     void editsWhileTheDecisionReadIsPendingPreventStaleAdoptionAndRemainUndoableAfterRetry() throws Exception {
         var pending = new ArrayDeque<Runnable>();
         try (var window = new EditorWindowFixture(directory, false, List.of("original"), pending::add)) {
+            window.ui.autoReloadUnmodifiedFilesSetting = false;
             var subject = window.active().documentSession().document();
             var id = subject.documentId();
             Files.writeString(window.document, "external");
@@ -268,7 +372,7 @@ class ExternalChangeIntegrationTest {
 
     private static void awaitNotice(EditorWindowFixture window, DocumentId id) throws Exception {
         window.await(() -> window.host.externalNotices.visible(id));
-        assertTrue(screenContains(window, "File changed on disk:"));
+        assertTrue(screenContains(window, "File changed on disk."));
     }
 
     private static void decisionComplete(EditorWindowFixture window, DocumentId id) throws Exception {

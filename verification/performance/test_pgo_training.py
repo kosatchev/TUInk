@@ -63,6 +63,7 @@ class PgoTrainingTest(unittest.TestCase):
             self.assertEqual(str(mouse).lower(), values["ui.mouseMode"])
             self.assertEqual(str(wrap).lower(), values["ui.wrapLines"])
             self.assertEqual("true", values["ui.confirmOnClose"])
+            self.assertEqual("true", values["ui.autoReloadUnmodifiedFiles"])
             for key in ("ui.markdownCodeHighlighting", "ui.rightClickClipboard", "ui.markdownVisualCopy", "ui.showDocumentPath"):
                 self.assertEqual("false", values[key], f"Baseline PGO training must keep {key} disabled")
 

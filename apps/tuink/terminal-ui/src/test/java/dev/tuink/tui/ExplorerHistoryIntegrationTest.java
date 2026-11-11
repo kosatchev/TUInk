@@ -25,11 +25,26 @@ import org.junit.jupiter.params.provider.CsvSource;
 class ExplorerHistoryIntegrationTest {
     @TempDir Path directory;
 
+    @Test void renamingAndUndoingRenameCannotDismissAnUnresolvedExternalWarning() throws Exception {
+        try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
+            window.event(new TextInput("draft ")); var subject = window.active().documentSession().document();
+            Files.writeString(window.document, "external");
+            window.await(() -> window.host.externalNotices.visible(subject.documentId()));
+            open(window); relocate(window, true, directory, "renamed.txt");
+            assertTrue(window.host.externalNotices.visible(subject.documentId()));
+            assertEquals(List.of("draft original"), window.active().tabSession().model().snapshotLines());
+            window.command(TuinkCommand.EXPLORER_UNDO); completed(window);
+            assertTrue(window.host.externalNotices.visible(subject.documentId()));
+            assertEquals("external", Files.readString(window.document));
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void physicalFileUndoRedoPreserveDirtyTextHistoryAndFollowAnAcceptedAtomicSave(boolean rename) throws Exception {
         Path destination = Files.createDirectory(directory.resolve("destination"));
         try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
+            window.ui.autoReloadUnmodifiedFilesSetting = false;
             window.event(new TextInput("draft "));
             var subject = window.active().documentSession().document();
             var document = subject.documentId();
@@ -86,6 +101,7 @@ class ExplorerHistoryIntegrationTest {
     @CsvSource({"false,false", "false,true", "true,false", "true,true"})
     void mixedFileHistoryPreservesLiveAndFrozenPreviewDraftsAndChecksCopyRedoAfterSave(boolean frozen, boolean save) throws Exception {
         try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("# Original"))) {
+            window.ui.autoReloadUnmodifiedFilesSetting = false;
             if (!frozen) window.event(new TextInput("draft "));
             window.command(TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW);
             window.await(() -> window.preview().ready());
@@ -102,8 +118,9 @@ class ExplorerHistoryIntegrationTest {
                 draft = "# Original";
                 Files.writeString(window.document, diskBefore);
                 window.await(() -> window.host.externalNotices.visible(subject.documentId()));
-                window.command(TuinkCommand.DOCUMENT_KEEP_EXTERNAL);
+                window.command(TuinkCommand.DOCUMENT_UPDATE_EXTERNAL);
                 window.await(() -> !window.documentIo.busy() && !window.host.externalNotices.visible(subject.documentId()));
+                window.event(KeyStroke.of(KeyStroke.Key.Z, KeyStroke.Modifier.CTRL));
             } else {
                 subject = window.active().documentSession().document();
                 diskBefore = "# Original";
@@ -175,6 +192,7 @@ class ExplorerHistoryIntegrationTest {
     @ValueSource(booleans = {false, true})
     void explicitExplorerHistoryCommandsWorkFromSourceAndPreview(boolean preview) throws Exception {
         try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("# original"))) {
+            window.ui.autoReloadUnmodifiedFilesSetting = false;
             open(window);
             relocate(window, true, directory, "renamed.md");
             Path renamed = directory.resolve("renamed.md");
@@ -203,6 +221,7 @@ class ExplorerHistoryIntegrationTest {
     @Test
     void searchFieldsAndReadOnlyPopupNeverUseTheSidebarFilesystemHistory() throws Exception {
         try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
+            window.ui.autoReloadUnmodifiedFilesSetting = false;
             open(window);
             relocate(window, true, directory, "renamed.txt");
             Path renamed = directory.resolve("renamed.txt");
@@ -231,6 +250,7 @@ class ExplorerHistoryIntegrationTest {
     @Test
     void savedCreatedFileCannotBeUndoneAndPermanentDeletionCreatesAHistoryBoundary() throws Exception {
         try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
+            window.ui.autoReloadUnmodifiedFilesSetting = false;
             open(window);
             select(window, directory);
             window.command(TuinkCommand.EXPLORER_NEW_FILE);
@@ -274,6 +294,7 @@ class ExplorerHistoryIntegrationTest {
     @Test
     void historyWarningsUseTheSidebarFooterAndThePreferenceOnlySuppressesThoseWarnings() throws Exception {
         try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
+            window.ui.autoReloadUnmodifiedFilesSetting = false;
             open(window);
             relocate(window, true, directory, "renamed.txt");
             window.notification.info("DOCUMENT_NOTICE");
@@ -304,6 +325,7 @@ class ExplorerHistoryIntegrationTest {
         long uid = ((Number) Files.getAttribute(directory, "unix:uid")).longValue();
         Path data = directory.resolve("isolated-system-data");
         try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
+            window.ui.autoReloadUnmodifiedFilesSetting = false;
             window.event(new TextInput("draft "));
             open(window);
             window.ui.sidebar.tree.close();

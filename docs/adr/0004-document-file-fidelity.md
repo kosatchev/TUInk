@@ -26,7 +26,7 @@ intent: opening a missing path cannot overwrite a file that appears before the
 first save, and recovery preserves the same constraint across restart.
 Undo snapshots and recovery snapshots carry the same file metadata.
 The document retains a SHA-256 baseline of the exact bytes last loaded, saved,
-or explicitly accepted through Keep/Update, along with the resolved target path.
+or accepted through Update from disk, along with the resolved target path.
 Normal save and Save As to the current file
 reject changed, removed, retargeted, or unverifiable files before committing.
 Recovery retains this disk baseline separately from the edited document text.
@@ -39,9 +39,9 @@ unchanged. Activation and Refresh force a fresh check. There is no OS watcher.
 Observations carry the subject, expected resource binding, generation and exact
 byte version; the window never treats access denial or unknown I/O as removal.
 
-`DocumentSaveSubject.acceptExternal(expected, loaded, update)` applies an explicit
-owner decision after a fresh worker read. Keep acknowledges the observed disk
-baseline while retaining current text and format. Update accepts that version's
+`DocumentSaveSubject.acceptExternal(expected, loaded, update)` applies an owner
+decision after a fresh worker read. Automatic update rechecks that the setting
+is enabled and the captured document still has no local edits. Update accepts that version's
 text and format in one Undo entry while retaining earlier local history and the
 original-open historical gutter baseline. The accepted disk baseline is separate
 from Undo: undoing Update restores the previous text/format and can make it dirty,
@@ -177,3 +177,9 @@ denial and unknown I/O failures; there is no filesystem watcher.
   exact.
 - Recovery format changes when this information becomes required; incompatible
   old snapshots are rejected without overwrite according to storage policy.
+
+Saving over changed external bytes requires a fresh inspected target and explicit
+confirmation that external changes will be destroyed. The approved authorization
+can replace the older loaded baseline while retaining exact ticket/version,
+alias and publication checks. Cancelling or failing keeps the unresolved warning;
+only a successful update or explicit save resolves it.

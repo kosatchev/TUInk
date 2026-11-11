@@ -17,6 +17,7 @@ final class UiSessionState {
     boolean readingModeSetting;
     boolean confirmOnCloseSetting;
     boolean mouseModeSetting;
+    boolean autoReloadUnmodifiedFilesSetting = true;
     boolean rightClickClipboardSetting;
     boolean highlightActiveGutterSetting;
     boolean smartHomeEndSetting;
@@ -45,7 +46,7 @@ final class UiSessionState {
             markdownCodeHighlightingSetting,
             gutterDiffModeSetting, tabWidthSetting,
             tabInsertModeSetting, theme, rightClickClipboardSetting, markdownVisualCopySetting,
-            showFileHistoryNotificationsSetting, showDocumentPathSetting, searchPreferences, sidebar.preferences());
+            showFileHistoryNotificationsSetting, showDocumentPathSetting, searchPreferences, sidebar.preferences(), autoReloadUnmodifiedFilesSetting);
     }
 
     static UiSessionState from(AppSettings settings) {
@@ -65,6 +66,7 @@ final class UiSessionState {
         readingModeSetting = settings.readingMode();
         confirmOnCloseSetting = settings.confirmOnClose();
         mouseModeSetting = settings.mouseMode();
+        autoReloadUnmodifiedFilesSetting = settings.autoReloadUnmodifiedFiles();
         rightClickClipboardSetting = settings.rightClickClipboard();
         highlightActiveGutterSetting = settings.highlightActiveGutter();
         smartHomeEndSetting = settings.smartHomeEnd();

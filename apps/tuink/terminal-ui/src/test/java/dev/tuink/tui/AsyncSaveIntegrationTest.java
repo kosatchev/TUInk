@@ -528,10 +528,13 @@ class AsyncSaveIntegrationTest {
             Files.writeString(window.document, "external");
             scenario.executor.runNextOnWorker();
             window.frame();
-            assertFalse(window.documentIo.busy());
+            assertTrue(window.documentIo.busy(), "The conflict starts a fresh detached target inspection");
+            scenario.finishOperation();
+            assertTrue(window.selected().uiState().modalState.isSaveOverwriteConfirm());
+            assertTrue(window.selected().uiState().overwriteApproval.request().externalOverwrite());
             assertTrue(window.active().state().isDirty());
-            assertTrue(window.notification.message.startsWith("Save failed:"));
             assertEquals("external", Files.readString(window.document));
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
             window.event(new TextInput("after "));
             assertEquals(List.of("draft after original"), window.active().tabSession().model().snapshotLines());
         }
@@ -770,7 +773,7 @@ class AsyncSaveIntegrationTest {
     }
 
     @Test
-    void aFailedWriteCancelsTheDeferredQuitEvenWhenCloseConfirmationIsDisabled() throws Exception {
+    void cancelledExternalOverwriteCancelsTheDeferredQuitEvenWhenCloseConfirmationIsDisabled() throws Exception {
         try (Scenario scenario = scenario()) {
             EditorWindowFixture window = scenario.window;
             window.ui.confirmOnCloseSetting = true;
@@ -784,12 +787,15 @@ class AsyncSaveIntegrationTest {
             window.frame();
 
             assertTrue(window.controller.running());
+            scenario.finishOperation();
             assertFalse(window.documentIo.busy());
             assertTrue(window.active().state().isDirty());
-            assertTrue(window.controller.notificationState().message.startsWith("Save failed:"));
+            assertTrue(java.util.stream.IntStream.range(0, window.height).mapToObj(window::screenRow)
+                .anyMatch(line -> line.contains("External changes will be destroyed")));
             assertEquals(List.of("draft original"), window.active().tabSession().model().snapshotLines());
             assertEquals("external", Files.readString(window.document));
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            assertTrue(window.controller.running());
             window.event(new TextInput("after "));
             assertEquals(List.of("draft after original"), window.active().tabSession().model().snapshotLines());
         }

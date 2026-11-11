@@ -15,7 +15,6 @@ public enum TuinkCommand {
     DOCUMENT_OPEN("tuink.document.open", "Open document"),
     DOCUMENT_SAVE("tuink.document.save", "Save document"),
     DOCUMENT_SAVE_AS("tuink.document.save-as", "Save document as"),
-    DOCUMENT_KEEP_EXTERNAL("tuink.document.keep-external", "Keep current text after external change"),
     DOCUMENT_UPDATE_EXTERNAL("tuink.document.update-external", "Update from disk"),
     DOCUMENT_FORMAT("tuink.document.format", "Change document format"),
     DOCUMENT_FORMAT_APPLY("tuink.document.format.apply", "Apply document format"),
@@ -110,6 +109,7 @@ public enum TuinkCommand {
     VIEW_CYCLE_THEME("tuink.view.cycle-theme", "Cycle theme"),
 
     SETTINGS_TOGGLE_READING_MODE("tuink.settings.toggle-reading-mode", "Toggle reading mode"),
+    SETTINGS_TOGGLE_AUTO_RELOAD_UNMODIFIED("tuink.settings.toggle-auto-reload-unmodified", "Toggle automatic reload of unmodified files"),
     SETTINGS_TOGGLE_MOUSE("tuink.settings.toggle-mouse", "Toggle mouse input"),
     SETTINGS_TOGGLE_RIGHT_CLICK_CLIPBOARD("tuink.settings.toggle-right-click-clipboard", "Toggle right-click copy and paste"),
     SETTINGS_TOGGLE_CONFIRM_ON_CLOSE("tuink.settings.toggle-confirm-on-close", "Toggle close confirmation"),

@@ -123,6 +123,7 @@ def settings_text(*, mouse: bool, wrap: bool) -> str:
         "format": "2", "ui.showTabBar": "true", "ui.wrapLines": str(wrap).lower(),
         "ui.wrapWords": "true", "ui.readingMode": "false", "ui.confirmOnClose": "true",
         "ui.mouseMode": str(mouse).lower(), "ui.rightClickClipboard": "false",
+        "ui.autoReloadUnmodifiedFiles": "true",
         "ui.highlightActiveLineNumber": "true",
         "ui.markdownOpenBothTabs": "false", "ui.markdownOpenInPreview": "false",
         "ui.markdownCodeHighlighting": "false", "ui.markdownVisualCopy": "false",

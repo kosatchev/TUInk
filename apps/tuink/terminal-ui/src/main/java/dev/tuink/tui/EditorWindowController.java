@@ -517,13 +517,12 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             switch (observation.kind()) {
                 case CHANGED -> {
                     if (host.externalNotices.show(observation)) eventLoop.invalidate();
-                }
-                case UNCHANGED -> {
-                    if (host.externalNotices.visible(observation.subject().documentId())) {
-                        host.externalNotices.clear(observation.subject().documentId());
-                        eventLoop.invalidate();
+                    if (observation.loaded() != null && observation.generation() == ExternalChangeController.generation(observation.subject())
+                        && autoReloadAllowed(observation.subject())) {
+                        externalChanges.start(observation.subject(), host.externalNotices.notice(observation.subject().documentId()), true);
                     }
                 }
+                case UNCHANGED -> { /* A warning is resolved only by a successful reload or explicit save. */ }
                 case MISSING -> detachMissingExternal(observation.subject(), observation.expected(), observation.path());
                 case DENIED, UNKNOWN -> { }
             }
@@ -535,9 +534,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (subject == null) return;
         var notice = host.externalNotices.notice(subject.documentId());
         if (notice == null) return;
-        if (!notice.expected().equals(subject.binding())) {
-            host.externalNotices.clear(subject.documentId());
-        } else if (notice.subject() != subject) {
+        if (notice.subject() != subject) {
             host.externalNotices.show(new ExternalFileObserver.Observation(subject, subject.binding(),
                 ExternalChangeController.generation(subject), notice.path(), subject.reopenMode(),
                 ExternalFileObserver.Kind.CHANGED, notice.loaded(), notice.observation().version(), notice.observation().failure()));
@@ -566,26 +563,29 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         eventLoop.invalidate();
     }
 
-    private void requestExternalChange(boolean update, Object paintedScope) {
+    private boolean autoReloadAllowed(dev.tuink.editor.session.document.DocumentSaveSubject subject) {
+        return uiSessionState.autoReloadUnmodifiedFilesSetting && !subject.unsavedExternalChanges()
+            && (!(subject instanceof dev.tuink.editor.session.document.FrozenDocumentSession frozen) || !frozen.hasLocalEdits());
+    }
+
+    private void requestExternalReload() {
         var subject = currentDocumentSubject();
         if (subject == null) return;
         var notice = host.externalNotices.notice(subject.documentId());
-        if (paintedScope != null && (notice == null || notice.scopeId() != paintedScope)) return;
-        if (paintedScope == null && notice != null && externalNoticePlacement != null
-            && externalNoticePlacement.scope().id() != notice.scopeId()) return;
-        if (!update && notice == null) return;
+        if (notice != null && !notice.expected().equals(subject.binding())) notice = null;
         topMenu.close();
         cancelPointerCapture(PointerCaptureCancellation.SURFACE_CHANGED);
-        if (!externalChanges.start(subject, notice, update))
-            externalStatus(subject, "Wait for file operations to finish before choosing Keep or Update", false);
+        if (!externalChanges.start(subject, notice, false))
+            externalStatus(subject, "Wait for file operations to finish before updating from disk", false);
     }
 
     private void acceptExternalChange(ExternalChangeController.Outcome outcome) {
         var attempt = outcome.attempt();
         var subject = attempt.subject();
         if (disposed || !liveSubject(subject) || !subject.binding().equals(attempt.expected())) return;
+        if (attempt.automatic() && !autoReloadAllowed(subject)) return;
         if (ExternalChangeController.generation(subject) != attempt.generation()) {
-            externalStatus(subject, "The document changed while checking the file; choose Keep or Update again", false);
+            if (!attempt.automatic()) externalStatus(subject, "The document changed while checking the file; choose Update from disk again", false);
             return;
         }
         var shown = attempt.notice();
@@ -604,15 +604,15 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 + (result.failure() == null ? "" : ": " + result.failure()), true);
             return;
         }
-        if (shown != null && !Objects.equals(shown.observation().version(), result.version())) {
+        if (!attempt.automatic() && shown != null && !Objects.equals(shown.observation().version(), result.version())) {
             host.externalNotices.show(new ExternalFileObserver.Observation(subject, subject.binding(),
                 ExternalChangeController.generation(subject), attempt.path(), subject.reopenMode(),
                 ExternalFileObserver.Kind.CHANGED, result.loaded(), result.version(), result.failure()));
-            externalStatus(subject, "The file changed again; choose Keep or Update for the new version", false);
+            externalStatus(subject, "The file changed again; choose Update from disk for the new version", false);
             return;
         }
         try {
-            if (!subject.acceptExternal(attempt.expected(), result.loaded(), attempt.update())) {
+            if (!subject.acceptExternal(attempt.expected(), result.loaded(), true)) {
                 externalStatus(subject, "The document is no longer available for this external update", false);
                 return;
             }
@@ -622,10 +622,10 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         }
         host.externalNotices.clear(subject.documentId());
         refreshExternalPresentations(subject);
-        if (attempt.update()) for (var tab : tabs)
+        if (!attempt.automatic()) for (var tab : tabs)
             if (tab.documentSession().document() == subject) tab.viewportController().onEditorTextInteraction();
-        externalStatus(subject, attempt.update() ? "Updated from disk; Undo restores the previous text"
-            : "Current text kept; Save will replace the acknowledged disk version", false);
+        externalStatus(subject, attempt.automatic() ? "Automatically updated from disk"
+            : "Updated from disk; Undo restores the previous text", false);
         eventLoop.invalidate();
     }
 
@@ -1964,16 +1964,6 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         }
         if (uiSessionState.sidebar.placement != null && uiSessionState.sidebar.placement.menu() != null
             && routePaletteInput(inputEvent, navigationCommand)) return WindowInput.Consumed.INSTANCE;
-        if (inputEvent instanceof PointerEvent pointer && externalNoticePlacement != null && modalState().isNone()
-            && !ui().openFileMode && !topMenu.isOpen()) {
-            var decision = externalNoticePlacement.handle(pointer, new FocusContext(false, true,
-                FocusSpace.root(new Rect(0, 0, cols, rows))));
-            if (decision.output().isPresent()) {
-                var action = decision.output().orElseThrow();
-                requestExternalChange(action.equals(TerminalEditorApp.EXTERNAL_UPDATE_ACTION), externalNoticePlacement.scope().id());
-                return WindowInput.Consumed.INSTANCE;
-            }
-        }
         if (inputEvent instanceof PointerEvent pointer && deletedNoticePlacement != null && modalState().isNone()
             && !ui().openFileMode && !topMenu.isOpen()) {
             var dismissal = deletedNoticePlacement.handle(pointer, new FocusContext(false, true,
@@ -2902,8 +2892,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 host.deletedNotices.show(subject.documentId(), removed,
                     outcome.result().action() == dev.tuiframe.explorer.file.ExplorerFileService.Action.TRASH
                         ? "File moved to Trash" : "File deleted");
+                host.externalNotices.clear(subject.documentId());
             }
-            host.externalNotices.clear(subject.documentId());
         }
         refreshRelocatedPresentations(outcome.bindings().stream().map(ExplorerFileController.Relocated::binding).toList());
         uiSessionState.sidebar.mutating = false;
@@ -3151,8 +3141,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (surface.focus() != ActiveSurface.Focus.CONTENT && ControlCommandRouter.unsupportedLocally(availability)) return;
         var access = surface.availability(availability);
         if (!access.enabled()) { notice().warning(access.reason()); return; }
-        if (availability == TuinkCommand.DOCUMENT_KEEP_EXTERNAL || availability == TuinkCommand.DOCUMENT_UPDATE_EXTERNAL) {
-            requestExternalChange(availability == TuinkCommand.DOCUMENT_UPDATE_EXTERNAL, null);
+        if (availability == TuinkCommand.DOCUMENT_UPDATE_EXTERNAL) {
+            requestExternalReload();
             return;
         }
         if (surface.kind() == ActiveSurface.Kind.FROZEN_PREVIEW && surface.focus() == ActiveSurface.Focus.CONTENT
@@ -3698,6 +3688,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             outcome -> {
                 if (!current(recipient) || owner.formatDialog != draft) return;
                 if (outcome.succeeded()) {
+                    if (draft.purpose == DocumentFormatDialogView.Purpose.REOPEN)
+                        host.externalNotices.clear(document.document().documentId());
                     owner.formatDialog = null;
                     setModal(recipient, UiModalState.none());
                     UiEffects.notice(notice(recipient), SaveWorkflow.Notice.success(outcome.message()), submittedNoticeRevision);
@@ -4034,6 +4026,15 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
 
     private void startSave(UiRecipient origin, SaveWorkflow.SaveRequest unsubmitted, long originalNoticeRevision) {
         if (disposed) { unsubmitted.session().document().io().stop(); return; }
+        var subject = unsubmitted.session().document();
+        var bound = subject.binding().resource();
+        if (!unsubmitted.externalOverwrite() && !unsubmitted.inspecting() && host.externalNotices.visible(subject.documentId())
+            && bound != null && (unsubmitted.purpose() != SaveWorkflow.SavePurpose.SAVE_AS
+                || bound.id().equals(unsubmitted.operation().resource().id()))) {
+            subject.io().cancel(unsubmitted.operation());
+            try { unsubmitted = unsubmitted.inspectExternalOverwrite(); }
+            catch (IOException failure) { notice(origin).error(failure.getMessage()); return; }
+        }
         boolean global = origin.flow() == UiRecipient.Flow.WINDOW || isGlobalSave(unsubmitted);
         UiRecipient recipient = !global && origin.scope() == UiRecipient.Scope.PRESENTATION
             && Objects.equals(origin.viewId(), unsubmitted.session().viewId()) ? origin

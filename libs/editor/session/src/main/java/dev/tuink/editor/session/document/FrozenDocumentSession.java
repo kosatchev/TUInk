@@ -43,6 +43,7 @@ public final class FrozenDocumentSession implements DocumentSaveSubject, AutoClo
     private long generation;
     private Content acceptedDisk;
     private boolean externalDirty;
+    private boolean retainedLocalEdits;
     private Deque<ExternalEdit> externalUndo = new ArrayDeque<>();
     private Deque<ExternalEdit> externalRedo = new ArrayDeque<>();
 
@@ -58,7 +59,8 @@ public final class FrozenDocumentSession implements DocumentSaveSubject, AutoClo
         long weight() { return Math.addExact(before.weight(), after.weight()); }
     }
 
-    private FrozenDocumentSession(FrozenDocumentSource source) {
+    private FrozenDocumentSession(FrozenDocumentSource source, boolean retainedLocalEdits) {
+        this.retainedLocalEdits = retainedLocalEdits;
         this.source = Objects.requireNonNull(source, "source");
         documentId = source.text().documentId();
         io = new DocumentIoCoordinator(this, new SaveOperations());
@@ -66,7 +68,12 @@ public final class FrozenDocumentSession implements DocumentSaveSubject, AutoClo
         externalDirty = source.binding().resource() == null;
     }
 
-    public static FrozenDocumentSession create(FrozenDocumentSource source) { return new FrozenDocumentSession(source); }
+    public static FrozenDocumentSession create(FrozenDocumentSource source) { return new FrozenDocumentSession(source, false); }
+
+    public static FrozenDocumentSession create(FrozenDocumentSource source, boolean retainedLocalEdits) {
+        return new FrozenDocumentSession(source, retainedLocalEdits);
+    }
+    public boolean hasLocalEdits() { requireOwner(); return retainedLocalEdits || externalDirty; }
 
     public FrozenDocumentSource source() { requireOwner(); return source; }
     public long generation() { requireOwner(); return generation; }
@@ -110,6 +117,7 @@ public final class FrozenDocumentSession implements DocumentSaveSubject, AutoClo
             source = next;
             acceptedDisk = disk;
             externalDirty = !update && changed;
+            if (update) retainedLocalEdits = false;
             externalUndo = undo;
             externalRedo = redo;
             generation++;
@@ -259,6 +267,7 @@ public final class FrozenDocumentSession implements DocumentSaveSubject, AutoClo
             source = next;
             acceptedDisk = accepted;
             externalDirty = false;
+            retainedLocalEdits = false;
             generation++;
         }
     }

@@ -27,15 +27,21 @@ public final class NoticeBanner {
     private final String text;
     private final Severity severity;
     private final List<Action> actions;
+    private final boolean wrapping;
 
     public NoticeBanner(String text, Severity severity) {
         this(text, severity, List.of(Action.DISMISS));
     }
 
     public NoticeBanner(String text, Severity severity, List<Action> actions) {
+        this(text, severity, actions, false);
+    }
+
+    private NoticeBanner(String text, Severity severity, List<Action> actions, boolean wrapping) {
         this.text = TerminalPlainText.singleLine(Objects.requireNonNull(text, "text"));
         this.severity = Objects.requireNonNull(severity, "severity");
         this.actions = List.copyOf(actions);
+        this.wrapping = wrapping;
         var ids = new HashSet<String>();
         for (var action : this.actions)
             if (!ids.add(action.id())) throw new IllegalArgumentException("Notice action IDs must be unique");
@@ -44,8 +50,14 @@ public final class NoticeBanner {
     public String text() { return text; }
     public Severity severity() { return severity; }
     public List<Action> actions() { return actions; }
+    /** Plain notices can reserve enough rows for their complete instructions. */
+    public NoticeBanner wrapped() {
+        if (!actions.isEmpty()) throw new IllegalStateException("Wrapped notices have no actions");
+        return new NoticeBanner(text, severity, actions, true);
+    }
     private int actionsWidth() { return actions.stream().mapToInt(action -> new Button(action.label()).width()).sum() + Math.max(0, actions.size() - 1); }
     public int preferredHeight(int columns) {
+        if (wrapping) return messageLines(columns).size();
         if (actions.isEmpty() || columns >= actionsWidth() + 3) return 1;
         int rows = 1, used = 0;
         for (var action : actions) {
@@ -56,13 +68,38 @@ public final class NoticeBanner {
         return rows;
     }
 
+    private List<String> messageLines(int columns) {
+        if (!wrapping || columns <= 0) return List.of(text);
+        var lines = new ArrayList<String>();
+        var row = new StringBuilder();
+        var cursor = dev.tuiframe.text.TerminalText.graphemeCursor(text);
+        int width = 0;
+        while (cursor.advance()) {
+            String glyph = text.substring(cursor.start(), cursor.end());
+            int cells = CellText.width(glyph);
+            if (cells > columns) { glyph = "�"; cells = 1; }
+            if (width + cells > columns && !row.isEmpty()) {
+                int space = row.lastIndexOf(" ");
+                if (space > 0) {
+                    lines.add(row.substring(0, space));
+                    row.delete(0, space + 1);
+                    width = CellText.width(row.toString());
+                } else { lines.add(row.toString()); row.setLength(0); width = 0; }
+            }
+            if (row.isEmpty() && glyph.equals(" ")) continue;
+            row.append(glyph); width += cells;
+        }
+        if (!row.isEmpty() || lines.isEmpty()) lines.add(row.toString());
+        return List.copyOf(lines);
+    }
+
     public Placement place(Object scopeId, Rect bounds, Rect clip, boolean enabled) {
         Objects.requireNonNull(scopeId, "scopeId");
         Objects.requireNonNull(bounds, "bounds");
         Objects.requireNonNull(clip, "clip");
         boolean separate = preferredHeight(bounds.width()) > 1;
         Rect messageBounds = new Rect(bounds.x(), bounds.y(), separate ? bounds.width()
-            : Math.max(0, bounds.width() - actionsWidth() - (actions.isEmpty() ? 0 : 1)), Math.min(1, bounds.height()));
+            : Math.max(0, bounds.width() - actionsWidth() - (actions.isEmpty() ? 0 : 1)), wrapping ? bounds.height() : Math.min(1, bounds.height()));
         var targets = new ArrayList<RoutedTarget<Action, Action>>();
         int row = bounds.y() + (separate ? 1 : 0);
         int column = separate ? bounds.x() : bounds.rightExclusive() - actionsWidth();
@@ -76,14 +113,15 @@ public final class NoticeBanner {
             column += button.width() + 1;
         }
         var scope = new FocusScope<>(scopeId, FocusResetPolicy.CLEARED, targets, actions, actions);
-        return new Placement(this, bounds, clip.intersection(bounds), messageBounds, scope);
+        return new Placement(this, bounds, clip.intersection(bounds), messageBounds, scope, messageLines(messageBounds.width()));
     }
 
     public record Placement(NoticeBanner banner, Rect bounds, Rect clip, Rect messageBounds,
-        FocusScope<Action, Action> scope) implements PlacedInteractiveWidget<Action> {
+        FocusScope<Action, Action> scope, List<String> messageLines) implements PlacedInteractiveWidget<Action> {
         public Placement {
             Objects.requireNonNull(banner); Objects.requireNonNull(bounds); Objects.requireNonNull(clip);
             Objects.requireNonNull(messageBounds); Objects.requireNonNull(scope);
+            messageLines = List.copyOf(messageLines);
         }
 
         public Rect actionBounds(Action action) { return scope.target(action).orElseThrow().placement().bounds(); }
@@ -144,11 +182,12 @@ public final class NoticeBanner {
                 canvas.clip(clip);
                 canvas.fill(bounds, body);
                 int width = messageBounds.width();
-                String message = banner.text();
-                if (CellText.width(message) > width)
-                    message = width == 0 ? "" : CellText.clip(message, 0, width - 1) + "…";
-                CellText.drawClipped(canvas, messageBounds.x(), messageBounds.y(),
-                    message, body, width);
+                for (int line = 0; line < Math.min(messageBounds.height(), messageLines.size()); line++) {
+                    String message = messageLines.get(line);
+                    if (CellText.width(message) > width)
+                        message = width == 0 ? "" : CellText.clip(message, 0, width - 1) + "…";
+                    CellText.drawClipped(canvas, messageBounds.x(), messageBounds.y() + line, message, body, width);
+                }
                 boolean first = true;
                 for (var action : banner.actions()) {
                     var target = scope.target(action).orElseThrow();

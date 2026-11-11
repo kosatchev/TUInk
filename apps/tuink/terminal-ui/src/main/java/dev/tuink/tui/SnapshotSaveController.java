@@ -163,6 +163,15 @@ final class SnapshotSaveController implements AutoCloseable {
     private void start(SnapshotSaveWorkflow.Request request, long originalNoticeRevision) {
         PreviewTab preview = current(request.owner());
         if (preview == null || closed) { request.owner().subject().io().cancel(request.operation()); return; }
+        var subject = request.owner().subject();
+        var bound = subject.binding().resource();
+        if (!request.externalOverwrite() && !request.inspecting() && host.externalNotices.visible(subject.documentId())
+            && bound != null && (request.purpose() != SnapshotSaveWorkflow.SavePurpose.SAVE_AS
+                || bound.id().equals(request.operation().resource().id()))) {
+            subject.io().cancel(request.operation());
+            try { request = request.inspectExternalOverwrite(); }
+            catch (java.io.IOException failure) { notification(preview.uiState()).error(failure.getMessage()); invalidate.run(); return; }
+        }
         if (request.purpose() == SnapshotSaveWorkflow.SavePurpose.SAVE_AS && request.submission() == null)
             request = request.submitted(preview.uiState().saveAsInput.text(), preview.uiState().filenameRevision);
         pending = request;
